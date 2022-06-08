@@ -1,6 +1,7 @@
 static char _colorNames[][] = {"{default}", "{dark_red}", "{pink}", "{green}", "{yellow}", "{light_green}", "{light_red}", "{gray}", "{orange}", "{light_blue}", "{dark_blue}", "{purple}"};
 static char _colorCodes[][] = {"\x01", "\x02", "\x03", "\x04", "\x05", "\x06", "\x07", "\x08", "\x09", "\x0B", "\x0C", "\x0E"};
 
+/* warmup start */
 stock void StartWarmup(){
 	ExecuteAndSaveCvars("sourcemod/match/warmup.cfg");
 	ServerCommand("mp_warmup_end");
@@ -57,11 +58,19 @@ public Action Timer_CutTime(Handle timer){
 	return Plugin_Continue;
 }
 
+stock void KickNotReady(){
+	for (int i = 0; i < MaxClients; i++){
+		if (IsPlayer(i) && !Match_IsReady(i)) KickClient(i, "您因长时间未准备而被踢出服务器");
+	}
+}
+/* warmup end */
+
 stock void NextStage(){
 	if (!g_bIsChangeMap) ChangeMap();
 	else VotePick();
 }
 
+/* vote map start */
 public Action Timer_VoteMap(Handle timer){
 	int index = Max(g_iVoteMapCounts, sizeof(g_iVoteMapCounts));
 	char output[512];
@@ -82,7 +91,9 @@ stock void ChangeMap(){
 	}
 	CreateTimer(15.0, Timer_VoteMap);
 }
+/* vote map end */
 
+/* captain pick start */
 public Action Timer_VotePick(Handle timer){
 	int index = Max(g_iVotePickCounts, sizeof(g_iVotePickCounts));
 	Match_MessageToAll("本场比赛将使用【{green}%s{default}】分配方式", index == 0 ? "队长选人":"随机分配");
@@ -102,7 +113,10 @@ stock void CaptainPick(){
 	
 	// switch players to spec unless captain
 	for (int i = 0; i < MaxClients; i++){
-		if (IsPlayer(i) && i != captain1 && i != captain2) SwitchClientTeam(i, CS_TEAM_SPECTATOR);
+		if (IsPlayer(i) && i != captain1 && i != captain2){
+			g_clients.Push(i);
+			SwitchClientTeam(i, CS_TEAM_SPECTATOR);
+		}
 	}
 	
 	// switch captain1 to ct and another to t
@@ -128,6 +142,7 @@ stock void PickPlayer(){
 	if (GetRealClientCount() == 10){
 		StartKnifeRound();
 		CancelAllMenus();
+		CloseHandle(g_hPickingTimer);
 		g_hPickingTimer = INVALID_HANDLE;
 		return;
 	}
@@ -147,11 +162,15 @@ stock void PickPlayer(){
 
 public Action Timer_AutoPick(Handle timer){
 	ArrayList clients = new ArrayList();
-	for (int i = 0; i < MaxClients; i++){
-		if (IsPlayer(i) && GetClientTeam(i) == CS_TEAM_SPECTATOR) clients.Push(i);
+	for (int j = 0; j < g_clients.Length; j++){
+		int i = g_clients.Get(j);
+		if (GetClientTeam(i) == CS_TEAM_SPECTATOR) clients.Push(i);
 	}
 	
-	SwitchClientTeam(clients.Get(GetRandomInt(0, clients.Length - 1)), GetClientTeam(g_iPickingCaptain));
+	int client = clients.Get(GetRandomInt(0, clients.Length - 1));
+	SwitchClientTeam(client, GetClientTeam(g_iPickingCaptain));
+	int team = view_as<int>(Match_GetClientTeamtype(g_iPickingCaptain)) - 1;
+	g_tTeam[team].players[GetTeamClientCount(client) - 1] = client;
 	PickPlayer();
 }
 
@@ -193,6 +212,17 @@ stock void VotePick(){
 	CreateTimer(15.0, Timer_VotePick);
 }
 
+stock void GetCaptainPickMethod(char[] format, int maxsize){
+	int method = g_cCaptainPick.IntValue;
+	switch(method){
+		case 0:Format(format, maxsize, "ABABABABAB");
+		case 1:Format(format, maxsize, "ABBAABBAAB");
+		case 2:Format(format, maxsize, "ABAABBABAB");
+	}
+}
+/* captain pick end */
+
+/* pick team start */
 stock void PickTeam(int team){
 	for (int i = 0; i < MaxClients; i++){
 		if (!IsPlayer(i)) continue;
@@ -209,7 +239,9 @@ public Action Timer_PickTeam(Handle timer, int team){
 	// start vote friendlyfire
 	StartVoteFf();
 }
+/* pick team end */
 
+/* live start */
 public Action Timer_Live(Handle timer){
 	Live();
 }
@@ -221,45 +253,36 @@ stock void Live(){
 	Call_Finish();
 	Huds_ShowRealHudAll("<font color=\"#7FFF00;\">比赛开始</font>", 3);
 }
+/* live end */
 
-stock void KickNotReady(){
+/* overtime start */
+stock void VoteOvertime(){
 	for (int i = 0; i < MaxClients; i++){
-		if (IsPlayer(i) && !Match_IsReady(i)) KickClient(i, "您因长时间未准备而被踢出服务器");
+		if (IsPlayer(i)) ShowVoteOvertimeMenu(i);
 	}
 }
 
-stock void CancelAllMenus(){
-	for (int i = 0; i < MaxClients; i++){
-		if (IsPlayer(i)) CancelClientMenu(i, true);
-	}
+stock void ShowVoteOvertimeMenu(int client){
+	CustomVoteSetup setup;
+	setup.team = CS_TEAM_NONE; // broad team
+	setup.issue_id = VOTE_ISSUE_CONTINUE;
+	setup.pass_percentage = 70.0;
+	Format(setup.dispstr, sizeof(setup.dispstr), "是否加时？");
+	Format(setup.disppass, sizeof(setup.disppass), "正在加时...");
+	CustomVotes_Execute(setup, 10, OvertimeVotePassed, OvertimeVoteFailed);
 }
 
-stock void SwapTeam(){
-	ArrayList ct = new ArrayList();
-	for (int i = 0; i < MaxClients; i++){
-		if (IsPlayer(i) && GetClientTeam(i) == CS_TEAM_CT) ct.Push(i);
-	}
-	
-	for (int i = 0; i < MaxClients; i++){
-		if (IsPlayer(i) && GetClientTeam(i) == CS_TEAM_T) SwitchClientTeam(i, CS_TEAM_CT);
-	}
-	
-	for (int i = 0; i < ct.Length; i++){
-		SwitchClientTeam(ct.Get(i), CS_TEAM_T);
-	}
-	
-	delete ct;
+public void OvertimeVotePassed(int results[MAXPLAYERS + 1]){
+	Match_MessageToAll("投票结果为 {green}加时{default}");
 }
 
-stock void GetCaptainPickMethod(char[] format, int maxsize){
-	int method = g_cCaptainPick.IntValue;
-	switch(method){
-		case 0:Format(format, maxsize, "ABABABABAB");
-		case 1:Format(format, maxsize, "ABBAABBAAB");
-		case 2:Format(format, maxsize, "ABAABBABAB");
-	}
+public void OvertimeVoteFailed(int results[MAXPLAYERS + 1]){
+	Match_MessageToAll("投票结果为 {dark_red}不加时{default}");
+	EndMatch();
 }
+/* overtime end */
 
+/* friendlyfire start */
 stock void StartVoteFf(){
 	CreateTimer(7.0, Timer_EndVoteFf);
 	for (int i = 0; i < MaxClients; i++){
@@ -267,6 +290,19 @@ stock void StartVoteFf(){
 	}
 }
 
+public Action OnTakeDamage(int victim, int &attacker, int &inflictor, float &damage, int &damagetype, int &weapon, float damageForce[3], float damagePosition[3]){
+	if ((!Match_IsLive() || g_bEnableFriendlyfire) // not in match or ff is enable
+	|| (attacker < 1 || attacker > MaxClients || attacker == victim || weapon < 1) // self damage & greande
+	|| (GetClientTeam(victim) == GetClientTeam(attacker) && weapon < 1 && g_cFriendlyfire.BoolValue) // same team & grenade & enable team grenade damage
+	|| (GetClientTeam(victim) == GetClientTeam(attacker) && g_bEnableFriendlyfire) // same team & enable ff
+	|| (GetClientTeam(victim) != GetClientTeam(attacker))) // different team
+	return Plugin_Continue; 
+
+	return Plugin_Handled;
+}
+/* friendlyfire end */
+
+/* kniferound start */
 stock void StartKnifeRound(){
 	ExecuteAndSaveCvars("sourcemod/match/knife.cfg");
 	ServerCommand("mp_restartgame 1");
@@ -278,7 +314,9 @@ public Action Timer_StartKnifeRound(Handle timer){
 	if (g_cRecord.BoolValue) Record();
 	Huds_ShowRealHudAll("<font color=\"#7FFF00;\">拼刀选边</font>");
 }
+/* kniferound end */
 
+/* gotv record start */
 stock bool IsTVEnabled(){
 	Handle tvEnabledCvar = FindConVar("tv_enable");
 	if (tvEnabledCvar == INVALID_HANDLE) {
@@ -308,6 +346,31 @@ stock void Record(){
 stock void StopRecord(){
 	ServerCommand("tv_stoprecord");
 }
+/* gotv record end */
+
+/* misc */
+stock void CancelAllMenus(){
+	for (int i = 0; i < MaxClients; i++){
+		if (IsPlayer(i)) CancelClientMenu(i, true);
+	}
+}
+
+stock void SwapTeam(){
+	ArrayList ct = new ArrayList();
+	for (int i = 0; i < MaxClients; i++){
+		if (IsPlayer(i) && GetClientTeam(i) == CS_TEAM_CT) ct.Push(i);
+	}
+	
+	for (int i = 0; i < MaxClients; i++){
+		if (IsPlayer(i) && GetClientTeam(i) == CS_TEAM_T) SwitchClientTeam(i, CS_TEAM_CT);
+	}
+	
+	for (int i = 0; i < ct.Length; i++){
+		SwitchClientTeam(ct.Get(i), CS_TEAM_T);
+	}
+	
+	delete ct;
+}
 
 stock void EndMatch(){
 	StopRecord();
@@ -328,10 +391,10 @@ stock void RestoreVar(){
 	for (int i = 0; i < MAXPLAYERS + 1; i++){
 		g_bIsReady[i] = false;
 	}
-	g_bIsChangeMap = false;
 	g_iPickingCaptain = -1;
 	g_iPickCount = 0;
 	g_iSelectEnableFf = 0;
+	g_clients.Clear();
 }
 
 stock int GetMapIndexByName(const char[] map){
@@ -371,5 +434,18 @@ stock bool IsPlayer(int client){
 stock void Colorize(char[] msg, int size, bool stripColor = false) {
   for (int i = 0; i < sizeof(_colorNames); i++) {
   	ReplaceString(msg, size, _colorNames[i], stripColor ? "\x01":_colorCodes[i]);
+  }
+}
+
+stock void SwitchClientTeam(int client, int team) {
+  if (GetClientTeam(client) == team)
+    return;
+
+  if (team > CS_TEAM_SPECTATOR) {
+    CS_SwitchTeam(client, team);
+    CS_UpdateClientModel(client);
+    CS_RespawnPlayer(client);
+  } else {
+    ChangeClientTeam(client, team);
   }
 }

@@ -14,6 +14,9 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("Match_GetClientTeamtype", Native_GetClientTeamtype);
 	CreateNative("Match_SetCaptain", Native_SetCaptain);
 	CreateNative("Match_GetCaptain", Native_GetCaptain);
+	
+	RegPluginLibrary("match");
+	
 	return APLRes_Success;
 }
 
@@ -84,9 +87,10 @@ public int Native_IsWarmup(Handle plugin, int numParams){
 }
 
 public int Native_SetGameState(Handle plugin, int numParams){
-	Call_StartForward(g_hOnGameStateChanged);
-	Call_PushCell(g_GameState);
+	GameState before = g_GameState;
 	g_GameState = view_as<GameState>(GetNativeCell(1));
+	Call_StartForward(g_hOnGameStateChanged);
+	Call_PushCell(before);
 	Call_PushCell(g_GameState);
 	Call_Finish();
 }

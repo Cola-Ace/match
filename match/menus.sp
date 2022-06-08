@@ -2,7 +2,7 @@
 
 public Action Timer_EndVoteFf(Handle timer){
 	if (g_iSelectEnableFf == 6) g_bEnableFriendlyfire = true;
-	Match_MessageToAll("本场比赛将 %s", g_bEnableFriendlyfire ? "{dark_red}开启友伤{default}":"{green}关闭友伤{default}, 但道具仍能队友造成 {dark_red}100%的伤害{default}");
+	Match_MessageToAll("本场比赛将 %s", g_bEnableFriendlyfire ? "{dark_red}开启友伤{default}":"{green}关闭友伤{default}, 但道具仍能队友造成 {dark_red}100%%的伤害{default}");
 	
 	ExecuteAndSaveCvars("sourcemod/match/live.cfg");
 	ServerCommand("mp_restartgame 1");
@@ -104,8 +104,9 @@ stock void ShowPickMenu(int client){
 	
 	int captain1 = Match_GetCaptain(TeamType_Team1);
 	int captain2 = Match_GetCaptain(TeamType_Team2);
-	for (int i = 0; i < MaxClients; i++){
+	for (int j = 0; j < g_clients.Length; j++){
 		char info[4], display[32];
+		int i = g_clients.Get(j);
 		if (!IsPlayer(i) || i == captain1 || i == captain2) continue;
 		IntToString(i, info, sizeof(info));
 		Format(display, sizeof(display), "[%s] %N", GetClientTeam(i) == CS_TEAM_SPECTATOR ? "  ":"√", i);
